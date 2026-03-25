@@ -1,6 +1,6 @@
 # Caution
 
-This is a very new/immature library, and it should be considered unstable!
+This is a very new/immature library, and it should be considered unstable!  At present, lists should only be created or extended by a single account, and they should not be updated by parallel access paths.  Simultaneous updates from multiple connections will almost certainly lead to forks.
 
 # linkedListOnSteem
 
