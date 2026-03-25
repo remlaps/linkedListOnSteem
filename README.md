@@ -1,3 +1,7 @@
+# Caution
+
+This is a very new/immature library, and it should be considered unstable!
+
 # linkedListOnSteem
 
 A Python library for implementing a doubly-linked list data structure using `custom_json` transactions on the Steem blockchain.
