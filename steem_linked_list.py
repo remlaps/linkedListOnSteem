@@ -48,7 +48,7 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.1-alpha"
+__version__ = "0.0.2-alpha"
 
 import json
 import logging
@@ -103,6 +103,7 @@ class ListNode:
     block_num: Optional[int] = None
     trx_id: Optional[str] = None
     trx_num: Optional[int] = None
+    author: Optional[str] = None        # Steem account that authored the node
 
     # ------------------------------------------------------------------ #
     @property
@@ -126,6 +127,7 @@ class ListNode:
         block_num: Optional[int] = None,
         trx_id: Optional[str] = None,
         trx_num: Optional[int] = None,
+        author: Optional[str] = None,
     ) -> "ListNode":
         return cls(
             ll_id=data["ll_id"],
@@ -137,6 +139,7 @@ class ListNode:
             block_num=block_num,
             trx_id=trx_id,
             trx_num=trx_num,
+            author=author,
         )
 
 
@@ -163,7 +166,10 @@ class SteemLinkedList:
         If True, broadcast with the active key; otherwise posting key.
     wait_for_irreversible : bool
         If True, wait for the transaction to be included in an irreversible 
-        block before returning. Default is True.
+        block before returning. Default is `True`.
+    enforce_single_author : bool
+        If `True` (default), the index will only accept nodes created by the
+        same account that created the head node.
     """
 
     REQUIRED_AUTHS_KEY = "required_auths"
@@ -177,6 +183,7 @@ class SteemLinkedList:
         custom_json_id: str = "steem_ll",
         use_active_key: bool = False,
         wait_for_irreversible: bool = True,
+        enforce_single_author: bool = True,
     ) -> None:
         self.steem = steem_instance
         self.account = account
@@ -184,11 +191,13 @@ class SteemLinkedList:
         self.custom_json_id = custom_json_id[:32]   # Steem enforces 32-char limit
         self.use_active_key = use_active_key
         self.wait_for_irreversible = wait_for_irreversible
+        self.enforce_single_author = enforce_single_author
 
         # Off-chain index: seq -> ListNode (populated by rebuild_index)
         self._index: Dict[int, ListNode] = {}
         self._head: Optional[ListNode] = None
         self._tail: Optional[ListNode] = None
+        self._author: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -318,7 +327,12 @@ class SteemLinkedList:
     ) -> Optional[ListNode]:
         data = self._parse_custom_json_op(op_value)
         if data and data.get("ll_id") == self.ll_id:
-            return ListNode.from_json_payload(data, block_num=block_num, trx_id=trx_id, trx_num=trx_num)
+            author = None
+            auths = op_value.get(self.REQUIRED_POSTING_KEY, []) or op_value.get(self.REQUIRED_AUTHS_KEY, [])
+            if auths:
+                author = auths[0]
+            return ListNode.from_json_payload(
+                data, block_num=block_num, trx_id=trx_id, trx_num=trx_num, author=author)
         return None
 
     # ------------------------------------------------------------------ #
@@ -438,12 +452,39 @@ class SteemLinkedList:
             nodes_reversed.append(node)
             ptr = node.prev          # step backwards
 
+        # --- Author validation ---
+        if self.enforce_single_author and nodes_reversed:
+            head_node = nodes_reversed[-1]
+
+            # Determine the canonical author for this list segment.
+            # If we already know it from a previous sync, use that.
+            # Otherwise, if we've walked to the true head, use its author.
+            list_author = self._author
+            if list_author is None and head_node.prev.is_null():
+                list_author = head_node.author
+                self._author = list_author
+                if list_author:
+                    logger.info("List author determined from head node: %s", list_author)
+
+            if list_author:
+                # Filter the chain, truncating at the first sign of a fork.
+                # We iterate from tail to head (current order of nodes_reversed).
+                valid_nodes_reversed = []
+                for node in nodes_reversed:
+                    if node.author != list_author:
+                        logger.warning(
+                            "Chain broken at trx_id=%s: author '%s' does not match list author '%s'. Truncating list here.",
+                            node.trx_id, node.author, list_author
+                        )
+                        break  # Stop at the first foreign node.
+                    valid_nodes_reversed.append(node)
+                nodes_reversed = valid_nodes_reversed
+
         # Reverse to get head-first order and assign canonical seq numbers
         nodes_reversed.reverse()
         for seq, node in enumerate(nodes_reversed):
             node.seq = seq
 
-        # Populate in-memory next pointers
         for i in range(len(nodes_reversed) - 1):
             nodes_reversed[i].next = nodes_reversed[i + 1].pointer
 
@@ -478,6 +519,7 @@ class SteemLinkedList:
         self._index.clear()
         self._head = None
         self._tail = None
+        self._author = None
 
         logger.info("Locating tail for ll_id=%s …", self.ll_id)
         tail_ptr = self._find_tail_pointer(after_block=after_block)
@@ -572,6 +614,12 @@ class SteemLinkedList:
 
         Returns the confirmed ListNode (block_num and trx_id populated).
         """
+        if self.enforce_single_author and self._author and self.account != self._author:
+            raise ValueError(
+                f"Account '{self.account}' does not match the list author '{self._author}'. "
+                f"Cannot append to this list with enforce_single_author=True."
+            )
+
         # Automatically create a dataless anchor if the list is completely empty
         if not self._index and not payload.get("_is_anchor"):
             logger.info("List is empty. Automatically creating a dataless anchor at seq=0.")
@@ -601,10 +649,13 @@ class SteemLinkedList:
         node.block_num = result.get("block_num")
         node.trx_id    = result.get("id") or result.get("trx_id") or result.get("transaction_id", "")
         node.trx_num   = result.get("trx_num")
+        node.author    = self.account
 
         if seq == 0:
             # Self-referential head pointer
             node.head = node.pointer
+            if self.enforce_single_author:
+                self._author = self.account
         else:
             node.head = self._head.pointer  # type: ignore[union-attr]
 
@@ -828,6 +879,7 @@ class SteemLinkedList:
             entry["block_num"] = n.block_num
             entry["trx_id"]    = n.trx_id
             entry["trx_num"]   = n.trx_num
+            entry["author"]    = n.author
             result.append(entry)
         return result
 
@@ -838,16 +890,22 @@ class SteemLinkedList:
         Useful for caching / faster startup.
         """
         self._index.clear()
+        self._author = None
         for entry in data:
             block_num = entry.pop("block_num", None)
             trx_id    = entry.pop("trx_id", None)
             trx_num   = entry.pop("trx_num", None)
-            node = ListNode.from_json_payload(entry, block_num=block_num, trx_id=trx_id, trx_num=trx_num)
+            author    = entry.pop("author", None)
+            node = ListNode.from_json_payload(
+                entry, block_num=block_num, trx_id=trx_id, trx_num=trx_num, author=author
+            )
             self._index[node.seq] = node
         if self._index:
             self._head = self._index[0]
             self._tail = self._index[max(self._index.keys())]
-            
+            if self.enforce_single_author and self._head.author:
+                self._author = self._head.author
+
         self._apply_tombstones()
 
     # ------------------------------------------------------------------ #

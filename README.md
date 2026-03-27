@@ -1,6 +1,10 @@
-# Caution
+# ⚠️ Important: Concurrency and Forks
 
-This is a very new/immature library, and it should be considered unstable!  At present, lists should only be created or extended by a single account, and they should not be updated by parallel access paths.  Simultaneous updates from multiple connections will almost certainly lead to forks.
+This library is designed for scenarios where a **single process** appends to a list.
+
+**Do not attempt to append to the same list from multiple processes or accounts simultaneously.** Doing so will create a "fork" in the list, where different clients will see different versions of the data, leading to data inconsistency.
+
+To mitigate this, the library includes an `enforce_single_author` protection (enabled by default) which ensures that only the account that created the list can append new nodes. While this prevents forks from *different accounts*, it does **not** protect against concurrent appends from the *same account* running in parallel processes.
 
 # linkedListOnSteem
 

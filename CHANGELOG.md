@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2-alpha] - 2026-03-26
+
+### Added
+- **Single Author Enforcement**: A new `enforce_single_author` parameter (default `True`) in the `SteemLinkedList` constructor prevents other accounts from appending to or deleting from a list. This provides a crucial backstop against accidental list forks.
+
+### Changed
+- Updated `README.md` with a prominent warning about concurrency and the new single-author protection.
+
 ## [0.0.1-alpha] - 2026-03-25
 
 ### Changed
@@ -35,4 +43,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `fetch_node_by_pointer()`: Directly fetch a single node from the blockchain given its pointer.
 - Example usage script (`steem_linked_list_examples.py`) demonstrating all core features.
 - Test script (`steem_linked_list_post_test.py`) test all core features and optionally post results to the blockchain.
-
