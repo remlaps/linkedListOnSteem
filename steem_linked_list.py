@@ -48,7 +48,7 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.2-alpha"
+__version__ = "0.0.3-alpha"
 
 import json
 import logging
@@ -165,8 +165,8 @@ class SteemLinkedList:
     use_active_key : bool
         If True, broadcast with the active key; otherwise posting key.
     wait_for_irreversible : bool
-        If True, wait for the transaction to be included in an irreversible 
-        block before returning. Default is `True`.
+        If True, wait for the transaction to be included in an irreversible
+        block before returning (~45-60s). Default is `False`.
     enforce_single_author : bool
         If `True` (default), the index will only accept nodes created by the
         same account that created the head node.
@@ -182,7 +182,7 @@ class SteemLinkedList:
         ll_id: str,
         custom_json_id: str = "steem_ll",
         use_active_key: bool = False,
-        wait_for_irreversible: bool = True,
+        wait_for_irreversible: bool = False,
         enforce_single_author: bool = True,
     ) -> None:
         self.steem = steem_instance
@@ -598,6 +598,32 @@ class SteemLinkedList:
                     if t_node.trx_id == target_trx:
                         t_node.payload["_deleted"] = True
 
+    def _is_orphaned(self, node: ListNode) -> bool:
+        """
+        Check if the given node was orphaned by a concurrent writer.
+        Walks backwards from the absolute latest tail on the blockchain until
+        it finds the node, or passes the block where the node was confirmed.
+        """
+        tail_ptr = self._find_tail_pointer()
+        if not tail_ptr:
+            return True
+            
+        ptr = tail_ptr
+        target_block = node.block_num or 0
+        
+        while not ptr.is_null():
+            if ptr.trx_id == node.trx_id:
+                return False
+            if ptr.block < target_block:
+                return True
+                
+            fetched = self.fetch_node_by_pointer(ptr)
+            if not fetched:
+                break
+            ptr = fetched.prev
+            
+        return True
+
     def _require_index(self) -> None:
         if not self._index and self._head is None:
             raise RuntimeError(
@@ -675,6 +701,48 @@ class SteemLinkedList:
         )
         return node
 
+    def safe_append(self, payload: Dict[str, Any], max_retries: int = 5, wait_time: float = 15.0) -> ListNode:
+        """
+        Append a node with Optimistic Concurrency Control (OCC).
+        
+        Use this method instead of `append()` if you expect multiple instances 
+        of your application to write to the list simultaneously.
+        
+        It broadcasts the node, waits for propagation, and verifies that the node
+        became part of the canonical main chain. If a concurrent instance appended 
+        at the exact same time and caused a fork, the orphaned node is detected, 
+        and the append is automatically retried on the winning branch.
+        """
+        for attempt in range(max_retries):
+            self.sync()
+            old_tail = self._tail
+            
+            node = self.append(payload)
+            logger.info("safe_append attempt %d: broadcast tx %s", attempt + 1, node.trx_id)
+            
+            # Wait for potential concurrent writes to settle in the blockchain
+            time.sleep(wait_time)
+            
+            if not self._is_orphaned(node):
+                return node
+                
+            logger.warning(
+                "safe_append collision detected: %s was orphaned by a concurrent writer. Retrying...", 
+                node.trx_id
+            )
+            
+            # Rollback local state to prepare for sync & retry
+            if old_tail is None:
+                self.rebuild_index()
+            else:
+                if node.seq in self._index:
+                    del self._index[node.seq]
+                self._tail = old_tail
+                old_tail.next = NodePointer.null()
+                self.sync()
+                
+        raise RuntimeError(f"Failed to safely append after {max_retries} attempts due to high contention.")
+
     # ------------------------------------------------------------------ #
     # Soft-delete  (tombstone approach — Steem is immutable)
     # ------------------------------------------------------------------ #
@@ -708,6 +776,28 @@ class SteemLinkedList:
         logger.info("Tombstoned node seq=%d via append seq=%d", seq, tombstone.seq)
         return tombstone
 
+    def safe_delete(self, seq: int, max_retries: int = 5, wait_time: float = 15.0) -> ListNode:
+        """
+        Logically delete a node using Optimistic Concurrency Control (OCC).
+        Safe to use when multiple instances might be modifying the list.
+        """
+        self._require_index()
+        if seq == 0:
+            raise ValueError("Cannot delete the root anchor node (seq=0).")
+        if seq not in self._index:
+            raise KeyError(f"No node at seq={seq}.")
+
+        target = self._index[seq]
+        if target.payload.get("_is_anchor"):
+            raise ValueError("Cannot delete an anchor node.")
+            
+        tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
+        tombstone = self.safe_append(tombstone_payload, max_retries, wait_time)
+        
+        target.payload["_deleted"] = True
+        logger.info("Safely tombstoned node seq=%d via append seq=%d", seq, tombstone.seq)
+        return tombstone
+
     def delete_active(self, index: int) -> ListNode:
         """
         Logically delete the n-th active (non-deleted) node in the list.
@@ -715,6 +805,13 @@ class SteemLinkedList:
         """
         target_node = self.get_active(index)
         return self.delete(target_node.seq)
+
+    def safe_delete_active(self, index: int, max_retries: int = 5, wait_time: float = 15.0) -> ListNode:
+        """
+        Logically delete the n-th active node using Optimistic Concurrency Control.
+        """
+        target_node = self.get_active(index)
+        return self.safe_delete(target_node.seq, max_retries, wait_time)
 
     # ------------------------------------------------------------------ #
     # Traversal

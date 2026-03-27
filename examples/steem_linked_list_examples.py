@@ -56,7 +56,7 @@ ll = SteemLinkedList(
     ll_id=LIST_ID,
     custom_json_id=CUSTOM_JSON_ID,
     use_active_key=False,   # posting key is fine for custom_json
-    wait_for_irreversible=True,
+    wait_for_irreversible=False,
 )
 
 
@@ -64,10 +64,13 @@ ll = SteemLinkedList(
 # 3. Append nodes  (each becomes a custom_json transaction on-chain)
 # ---------------------------------------------------------------------------
 
+# Fast append (assumes no concurrent writers)
 node_a = ll.append({"title": "Conowingo Dam", "species": "Bald Eagle", "count": 3})
-node_b = ll.append({"title": "Susquehanna Corridor", "species": "Red-tailed Hawk", "count": 7})
-node_c = ll.append({"title": "West Chester PA", "species": "Turkey Vulture", "count": 12})
-node_d = ll.append({"title": "Longwood Gardens", "species": "Northern Cardinal", "count": 5})
+
+# Safe append (Optimistic Concurrency Control - automatically resolves forks if multiple instances are running)
+node_b = ll.safe_append({"title": "Susquehanna Corridor", "species": "Red-tailed Hawk", "count": 7})
+node_c = ll.safe_append({"title": "West Chester PA", "species": "Turkey Vulture", "count": 12})
+node_d = ll.safe_append({"title": "Longwood Gardens", "species": "Northern Cardinal", "count": 5})
 
 print(f"Head: block={node_a.block_num}  trx_id={node_a.trx_id}  trx_num={node_a.trx_num}")
 print(f"Tail: block={node_d.block_num}  trx_id={node_d.trx_id}  trx_num={node_d.trx_num}")
@@ -126,12 +129,12 @@ print(f"\nSightings with count >= 7: {[n.payload['title'] for n in all_large]}")
 # Initial active list: ['Conowingo Dam', 'Susquehanna Corridor', 'West Chester PA', 'Longwood Gardens']
 
 node_to_delete_by_seq = ll_fresh.get(2) # Absolute position 2 is 'Susquehanna Corridor'
-tombstone = ll_fresh.delete(2)
+tombstone = ll_fresh.safe_delete(2)     # Concurrency-safe delete
 print(f"\nTombstoned seq=2 ('{node_to_delete_by_seq.payload.get('title')}') via trx_id={tombstone.trx_id} (trx_num={tombstone.trx_num})")
 
 # Now demonstrate delete_active on the remaining active nodes: ['Conowingo Dam', 'West Chester PA', 'Longwood Gardens']
 node_to_delete_by_active_index = ll_fresh.get_active(1) # Active index 1 is now 'West Chester PA'
-tombstone2 = ll_fresh.delete_active(1)
+tombstone2 = ll_fresh.safe_delete_active(1)
 print(f"Tombstoned active index 1 ('{node_to_delete_by_active_index.payload.get('title')}') via delete_active, trx_id={tombstone2.trx_id}")
 
 # Deleted nodes are automatically skipped during normal iteration:

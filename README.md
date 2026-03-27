@@ -1,11 +1,3 @@
-# ⚠️ Important: Concurrency and Forks
-
-This library is designed for scenarios where a **single process** appends to a list.
-
-**Do not attempt to append to the same list from multiple processes or accounts simultaneously.** Doing so will create a "fork" in the list, where different clients will see different versions of the data, leading to data inconsistency.
-
-To mitigate this, the library includes an `enforce_single_author` protection (enabled by default) which ensures that only the account that created the list can append new nodes. While this prevents forks from *different accounts*, it does **not** protect against concurrent appends from the *same account* running in parallel processes.
-
 # linkedListOnSteem
 
 A Python library for implementing a doubly-linked list data structure using `custom_json` transactions on the Steem blockchain.
@@ -23,6 +15,7 @@ The index is quickly rebuilt on-demand by locating the list's tail in the accoun
 * **Efficient Syncing**: 
     * `rebuild_index()`: Reconstructs the list in seconds, regardless of how long ago it was created.
     * `sync()`: Incrementally fetches only new nodes added since the last check.
+* **Concurrency Safe**: Use `safe_append()` to enable Optimistic Concurrency Control (OCC). If multiple instances of your app write simultaneously and create a fork, the library will automatically detect the orphaned node, re-sync, and re-append on the winning branch.
 * **Local Caching**: Export and import the list index (`export_index()` / `import_index()`) to avoid re-querying the blockchain on startup.
 * **Rich Traversal**: Forward and reverse iteration, absolute and active index access (`get()`, `get_active()`), and predicate-based searching (`find()`, `find_all()`).
 
@@ -53,8 +46,9 @@ ll = SteemLinkedList(
 )
 
 # 3. Append Nodes
-ll.append({"title": "First Entry", "value": 100})
-ll.append({"title": "Second Entry", "value": 200})
+# Use safe_append if multiple app instances might write at the same time
+ll.safe_append({"title": "First Entry", "value": 100})
+ll.safe_append({"title": "Second Entry", "value": 200})
 
 # 4. Read & Traverse
 # (In a fresh session, rebuild the index first)

@@ -50,7 +50,7 @@ def main():
         ll_id=LIST_ID,
         custom_json_id=CUSTOM_JSON_ID,
         use_active_key=False,
-        wait_for_irreversible=True
+        wait_for_irreversible=False
     )
 
     markdown_report = []
@@ -83,7 +83,7 @@ def main():
         log(f"* Appended Node D: `block={n4.block_num} trx_id={n4.trx_id} trx_num={n4.trx_num}`")
 
         # Wait for block confirmation before querying account history
-        log("\n*Waiting 60 seconds for blocks to confirm...*")
+        log("\n*Waiting 90 seconds for blocks to confirm...*")
         time.sleep(90)
 
         # 2. Rebuild Index & Sync
