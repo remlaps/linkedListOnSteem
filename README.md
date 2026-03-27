@@ -15,7 +15,7 @@ The index is quickly rebuilt on-demand by locating the list's tail in the accoun
 * **Efficient Syncing**: 
     * `rebuild_index()`: Reconstructs the list in seconds, regardless of how long ago it was created.
     * `sync()`: Incrementally fetches only new nodes added since the last check.
-* **Concurrency Safe**: Use `safe_append()` to enable Optimistic Concurrency Control (OCC). If multiple instances of your app write simultaneously and create a fork, the library will automatically detect the orphaned node, re-sync, and re-append on the winning branch.
+* **Multi-Author Concurrency Safe**: Use `safe_append()` to enable Optimistic Concurrency Control (OCC). If multiple accounts write to the same list simultaneously, the library uses direct block scanning to detect and resolve forks, ensuring data consistency.
 * **Local Caching**: Export and import the list index (`export_index()` / `import_index()`) to avoid re-querying the blockchain on startup.
 * **Rich Traversal**: Forward and reverse iteration, absolute and active index access (`get()`, `get_active()`), and predicate-based searching (`find()`, `find_all()`).
 
@@ -62,6 +62,14 @@ for node in ll:
 
 * **Examples**: Check out `examples/steem_linked_list_examples.py` for a comprehensive walkthrough of all features, including soft-deletion, reverse traversal, and caching.
 * **Tests**: Run `tests/steem_linked_list_post_test.py` to execute a full integration test suite. This script optionally broadcasts its execution report directly to the Steem blockchain as a top-level post.
+
+## Multi-Author Lists & Architectural Limitations
+
+The library's concurrency control (`safe_append`, `safe_delete`) is designed to work across multiple accounts, allowing for collaborative lists.
+
+**Important Limitation**: Due to how data is indexed on the Steem blockchain, discovering list updates from *other* authors is only reliable for recent activity (within the last ~10-15 minutes). The `rebuild_index()` and `sync()` methods are optimized to bridge short-term API node lag but **cannot** efficiently scan months of blockchain history to find an append from a different author.
+
+For applications requiring robust multi-author collaboration over long timeframes, a dedicated off-chain indexer service (a "TailTracker") is the recommended architecture to discover list tails across the entire blockchain history. The library can then use that information to verify the data on-chain.
 
 ## License
 

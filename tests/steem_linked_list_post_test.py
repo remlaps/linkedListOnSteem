@@ -50,7 +50,7 @@ def main():
         ll_id=LIST_ID,
         custom_json_id=CUSTOM_JSON_ID,
         use_active_key=False,
-        wait_for_irreversible=False
+        wait_for_irreversible=True
     )
 
     markdown_report = []

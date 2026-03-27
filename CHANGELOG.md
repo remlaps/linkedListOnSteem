@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4-alpha] - 2026-03-27
+
+### Changed
+- **Switched to Block Scanning for Concurrency**: `_is_orphaned()` no longer uses `get_account_history`. It now scans recent blocks directly to detect forks. This makes concurrency control resilient to history API lag and fully compatible with multi-author lists.
+- **Improved Indexing Resilience**: `rebuild_index()` and `sync()` now use a hybrid tail-discovery strategy. They combine a fast `get_account_history` lookup with a capped block scan to find the true tail, even if the history API is lagging.
+- **Verify finality**: Switched default setting back to true for ```wait_for_irreversible```.
+
+### Fixed
+- Fixed a race condition where `safe_append` could fail if `wait_for_irreversible=True` pushed a node's block outside the fixed block-scanning window. The scan depth is now calculated dynamically.
+- Fixed a bug where `rebuild_index` could fail to find recently appended nodes due to API history lag, causing `KeyError` on subsequent operations.
+- Capped the dynamic block scan depth to a reasonable limit (`MAX_SCAN_LIMIT`) to prevent the library from attempting to scan millions of blocks on very old lists, which would freeze the application.
+
 ## [0.0.3-alpha] - 2026-03-27
 
 ### Added

@@ -48,7 +48,7 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.3-alpha"
+__version__ = "0.0.4-alpha"
 
 import json
 import logging
@@ -166,7 +166,7 @@ class SteemLinkedList:
         If True, broadcast with the active key; otherwise posting key.
     wait_for_irreversible : bool
         If True, wait for the transaction to be included in an irreversible
-        block before returning (~45-60s). Default is `False`.
+        block before returning (~45-60s). Default is `True`.
     enforce_single_author : bool
         If `True` (default), the index will only accept nodes created by the
         same account that created the head node.
@@ -182,7 +182,7 @@ class SteemLinkedList:
         ll_id: str,
         custom_json_id: str = "steem_ll",
         use_active_key: bool = False,
-        wait_for_irreversible: bool = False,
+        wait_for_irreversible: bool = True,
         enforce_single_author: bool = True,
     ) -> None:
         self.steem = steem_instance
@@ -494,15 +494,16 @@ class SteemLinkedList:
         """
         Rebuild the in-memory index by walking ``prev`` pointers from the
         tail back to the head — no full blockchain scan required.
-
+        
         Strategy
         --------
-        1. Search the account's transaction history for the most recent
-           custom_json op belonging to this list.  That is the tail.
-        2. Follow each node's ``prev`` pointer (a precise block+trx_id
-           reference) backwards until reaching the head (null ``prev``).
-        3. Reverse the collected nodes and assign seq numbers 0, 1, 2, …
-
+        This uses a hybrid tail-discovery strategy to be both efficient and robust:
+        1. It queries the primary account's history (`get_account_history`) for a
+           candidate tail. This is fast for finding old, single-author lists.
+        2. It also scans the last ~30 blocks directly to find any nodes that the
+           history API may have missed due to indexing lag, or nodes from other authors.
+        3. It compares all candidates and selects the true tail (highest seq/block),
+           then walks the `prev` chain backwards to build the index.
         Parameters
         ----------
         after_block : int or None
@@ -522,22 +523,54 @@ class SteemLinkedList:
         self._author = None
 
         logger.info("Locating tail for ll_id=%s …", self.ll_id)
-        tail_ptr = self._find_tail_pointer(after_block=after_block)
 
-        if tail_ptr is None:
+        # --- Hybrid Tail Discovery ---
+        # 1. Use account history for a fast, long-range search (for single-author lists).
+        history_tail_ptr = self._find_tail_pointer(after_block=after_block)
+
+        # 2. Scan recent blocks to find tails missed by lagging history or from other authors.
+        num_blocks_to_scan = 30  # Default scan depth
+        MAX_SCAN_LIMIT = 200     # Cap the scan at ~10 minutes to prevent massive blockchain reads
+        if history_tail_ptr and not history_tail_ptr.is_null():
+            try:
+                props = self.steem.get_dynamic_global_properties()
+                head_block = props.get("head_block_number", 0)
+                if head_block > history_tail_ptr.block:
+                    # Scan the gap to cover history lag, but strictly cap it to avoid freezing the app
+                    lag_gap = head_block - history_tail_ptr.block + 10
+                    num_blocks_to_scan = max(num_blocks_to_scan, min(lag_gap, MAX_SCAN_LIMIT))
+                    logger.debug("Dynamically scanning %d blocks to cover history lag.", num_blocks_to_scan)
+            except Exception:
+                pass  # Stick with default on error
+        
+        recent_nodes = self._scan_blocks_for_nodes(num_blocks=num_blocks_to_scan)
+
+        candidate_nodes = []
+        if history_tail_ptr and not history_tail_ptr.is_null():
+            # Fetch the node to get its sequence number for sorting
+            history_tail_node = self.fetch_node_by_pointer(history_tail_ptr)
+            if history_tail_node:
+                candidate_nodes.append(history_tail_node)
+
+        candidate_nodes.extend(recent_nodes)
+
+        if not candidate_nodes:
             logger.info("No transactions found for ll_id=%s.", self.ll_id)
             return 0
+
+        # 3. Find the true tail among all candidates (Last-Write-Wins).
+        def sort_key(n: ListNode):
+            return (n.seq, n.block_num or 0, n.trx_num if n.trx_num is not None else 0)
+
+        unique_candidates = {n.trx_id: n for n in candidate_nodes if n.trx_id}.values()
+        true_tail_node = sorted(unique_candidates, key=sort_key)[-1]
+        tail_ptr = true_tail_node.pointer
 
         logger.info("Walking prev-chain from block=%s …", tail_ptr.block)
         nodes = self._walk_prev_from(tail_ptr)
 
         for node in nodes:
             self._index[node.seq] = node
-
-        # Re-link next pointers in memory
-        for seq in sorted(self._index.keys()):
-            if seq > 0:
-                self._index[seq - 1].next = self._index[seq].pointer
 
         if self._index:
             self._head = self._index[0]
@@ -560,10 +593,48 @@ class SteemLinkedList:
             return self.rebuild_index()
 
         after_block = self._tail.block_num
+        if not after_block: # Should not happen if tail exists, but as a safeguard
+            return self.rebuild_index()
+            
         logger.info("Syncing from block=%s …", after_block)
 
-        tail_ptr = self._find_tail_pointer(after_block=after_block)
-        if tail_ptr is None:
+        # --- Hybrid Tail Discovery for new nodes ---
+        history_tail_ptr = self._find_tail_pointer(after_block=after_block)
+        
+        num_blocks_to_scan = 30
+        MAX_SCAN_LIMIT = 200
+        if history_tail_ptr and not history_tail_ptr.is_null():
+            try:
+                props = self.steem.get_dynamic_global_properties()
+                head_block = props.get("head_block_number", 0)
+                if head_block > history_tail_ptr.block:
+                    lag_gap = head_block - history_tail_ptr.block + 10
+                    num_blocks_to_scan = max(num_blocks_to_scan, min(lag_gap, MAX_SCAN_LIMIT))
+            except Exception:
+                pass
+                
+        recent_nodes = self._scan_blocks_for_nodes(num_blocks=num_blocks_to_scan)
+
+        candidate_nodes = []
+        if history_tail_ptr and not history_tail_ptr.is_null():
+            history_tail_node = self.fetch_node_by_pointer(history_tail_ptr)
+            if history_tail_node:
+                candidate_nodes.append(history_tail_node)
+        
+        candidate_nodes.extend([n for n in recent_nodes if n.block_num and n.block_num > after_block])
+
+        if not candidate_nodes:
+            logger.info("No new nodes found.")
+            return 0
+
+        def sort_key(n: ListNode):
+            return (n.seq, n.block_num or 0, n.trx_num if n.trx_num is not None else 0)
+
+        unique_candidates = {n.trx_id: n for n in candidate_nodes if n.trx_id}.values()
+        true_tail_node = sorted(unique_candidates, key=sort_key)[-1]
+        tail_ptr = true_tail_node.pointer
+
+        if self._tail and tail_ptr.trx_id == self._tail.trx_id:
             logger.info("No new nodes found.")
             return 0
 
@@ -598,30 +669,101 @@ class SteemLinkedList:
                     if t_node.trx_id == target_trx:
                         t_node.payload["_deleted"] = True
 
-    def _is_orphaned(self, node: ListNode) -> bool:
-        """
-        Check if the given node was orphaned by a concurrent writer.
-        Walks backwards from the absolute latest tail on the blockchain until
-        it finds the node, or passes the block where the node was confirmed.
-        """
-        tail_ptr = self._find_tail_pointer()
-        if not tail_ptr:
-            return True
-            
-        ptr = tail_ptr
-        target_block = node.block_num or 0
-        
-        while not ptr.is_null():
-            if ptr.trx_id == node.trx_id:
-                return False
-            if ptr.block < target_block:
-                return True
+    def _scan_blocks_for_nodes(self, num_blocks: int) -> List[ListNode]:
+        """Scans the last `num_blocks` and returns all nodes for this list."""
+        found_nodes = []
+        try:
+            props = self.steem.get_dynamic_global_properties()
+            head_block = props.get("head_block_number", 0)
+        except Exception as e:
+            logger.warning("Could not get head block number: %s", e)
+            return []
+
+        start_block = max(1, head_block - num_blocks)
+        logger.debug("Scanning blocks from %d to %d for list nodes...", start_block, head_block)
+
+        for block_num in range(head_block, start_block - 1, -1):
+            try:
+                block_data = self.steem.get_block(block_num)
+                if not block_data:
+                    continue
                 
+                transactions = block_data.get("transactions", [])
+                tx_ids = block_data.get("transaction_ids", [])
+
+                for tx_idx, tx in enumerate(transactions):
+                    tx_id = tx.get("transaction_id")
+                    if not tx_id and tx_idx < len(tx_ids):
+                        tx_id = tx_ids[tx_idx]
+                    
+                    for op_wrapper in tx.get("operations", []):
+                        op_type, op_value = self._extract_op(op_wrapper)
+                        if op_type == "custom_json" and op_value.get("id") == self.custom_json_id:
+                            node = self._node_from_op(op_value, block_num, tx_id, tx_idx)
+                            if node:
+                                found_nodes.append(node)
+            except Exception as e:
+                logger.warning("Failed to process block %d: %s", block_num, e)
+                continue
+                
+        return found_nodes
+
+    def _is_orphaned(self, node: ListNode) -> Optional[bool]:
+        """
+        Check if the given node was orphaned by a concurrent writer by scanning
+        recent blocks to find the canonical tail. This method does not
+        rely on account_history and works for multi-author lists.
+        """
+        logger.debug("Verifying node %s by scanning recent blocks...", node.trx_id)
+        
+        target_block = node.block_num or 0
+        try:
+            props = self.steem.get_dynamic_global_properties()
+            head_block = props.get("head_block_number", target_block + 30)
+        except Exception:
+            head_block = target_block + 30
+            
+        # Ensure we scan deep enough to cover the node's block, plus a buffer
+        num_blocks = max(25, head_block - target_block + 10)
+        recent_nodes = self._scan_blocks_for_nodes(num_blocks=num_blocks)
+
+        if not any(n.trx_id == node.trx_id for n in recent_nodes):
+            logger.debug("Node not found in initial scan, waiting 3s and rescanning...")
+            time.sleep(3)
+            # Head block likely increased by 1 while waiting
+            recent_nodes = self._scan_blocks_for_nodes(num_blocks=num_blocks + 1)
+
+        if not recent_nodes:
+            logger.warning("Could not find any list nodes in recent blocks. Cannot determine status.")
+            return None
+
+        if not any(n.trx_id == node.trx_id for n in recent_nodes):
+            logger.warning("Just-broadcasted node %s not found in recent blocks. Cannot determine status.", node.trx_id)
+            return None
+
+        def sort_key(n: ListNode):
+            return (n.seq, n.block_num or 0, n.trx_num if n.trx_num is not None else 0)
+
+        canonical_tail = sorted(recent_nodes, key=sort_key)[-1]
+        logger.debug("Canonical tail identified as seq=%d, trx=%s", canonical_tail.seq, canonical_tail.trx_id)
+
+        ptr = canonical_tail.pointer
+        walk_limit = len(self._index) + len(recent_nodes) + 5
+        for _ in range(walk_limit):
+            if ptr.is_null():
+                break
+            
+            if ptr.trx_id == node.trx_id:
+                logger.debug("Node %s found in canonical chain. Not orphaned.", node.trx_id)
+                return False
+
             fetched = self.fetch_node_by_pointer(ptr)
             if not fetched:
+                logger.warning("Chain walk broke at %s, could not fetch.", ptr.trx_id)
                 break
             ptr = fetched.prev
-            
+
+        logger.warning("Node %s was not found in canonical chain. It is orphaned.", node.trx_id)
         return True
 
     def _require_index(self) -> None:
@@ -629,7 +771,6 @@ class SteemLinkedList:
             raise RuntimeError(
                 "Index is empty. Call rebuild_index() first, or append nodes."
             )
-
     # ------------------------------------------------------------------ #
     # Core list operations
     # ------------------------------------------------------------------ #
@@ -723,9 +864,17 @@ class SteemLinkedList:
             # Wait for potential concurrent writes to settle in the blockchain
             time.sleep(wait_time)
             
-            if not self._is_orphaned(node):
+            is_orphaned_status = self._is_orphaned(node)
+            if is_orphaned_status is False:
                 return node
                 
+            if is_orphaned_status is None:
+                raise RuntimeError(
+                    f"Could not verify append of {node.trx_id}. The node was not found in "
+                    "recent blocks, which could indicate a broadcast issue or severe API node lag. "
+                    "Cannot confirm state."
+                )
+
             logger.warning(
                 "safe_append collision detected: %s was orphaned by a concurrent writer. Retrying...", 
                 node.trx_id

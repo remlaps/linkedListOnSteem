@@ -42,8 +42,8 @@ steem = Steem(
     nodes=["https://api.steemit.com"],
     keys=[POSTING_KEY],   # posting key
 )
-# LIST_ID      = f"my_photo_log__example_{int(time.time())}"        # unique per list - create a new one each time
-LIST_ID      = f"my_photo_log_example"                              # unique per list - Reuse a potentially existing one
+LIST_ID      = f"my_photo_log__example_{int(time.time())}"        # unique per list - create a new one each time
+# LIST_ID      = f"my_photo_log_example"                              # unique per list - Reuse a potentially existing one
 CUSTOM_JSON_ID = "linkedListOnSteem"                        # on-chain custom_json id (≤32 chars)
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ ll = SteemLinkedList(
     ll_id=LIST_ID,
     custom_json_id=CUSTOM_JSON_ID,
     use_active_key=False,   # posting key is fine for custom_json
-    wait_for_irreversible=False,
+    wait_for_irreversible=True,
 )
 
 
@@ -75,6 +75,9 @@ node_d = ll.safe_append({"title": "Longwood Gardens", "species": "Northern Cardi
 print(f"Head: block={node_a.block_num}  trx_id={node_a.trx_id}  trx_num={node_a.trx_num}")
 print(f"Tail: block={node_d.block_num}  trx_id={node_d.trx_id}  trx_num={node_d.trx_num}")
 
+# Wait for block confirmation before querying account history
+print("\n*Waiting for blocks to be indexed by API nodes...*")
+time.sleep(90) # A short wait is still helpful for nodes to catch up
 
 # ---------------------------------------------------------------------------
 # 4. Rebuild the index from account history + prev-pointer walking
