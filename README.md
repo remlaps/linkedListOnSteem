@@ -2,6 +2,9 @@
 
 A Python library for implementing a doubly-linked list data structure using `custom_json` transactions on the Steem blockchain.
 
+> **⚠️ CAUTION:** 
+> The primary intended use case for this library is **single-process / single-user** applications. While Optimistic Concurrency Control (OCC) methods (`safe_append`, `safe_delete`) are provided, there is inherent uncertainty and potential risk of list forks when lists are accessed and modified concurrently by multiple users or threads. Use multi-author or concurrent features with extreme caution.
+
 ## Overview
 
 Because Steem transactions are immutable once confirmed, traditional "next" pointers cannot be back-patched when new nodes are added. This library overcomes this constraint by maintaining a continuous chain of `prev` pointers (using precise `block_num` and `trx_id` references) and building a lightweight off-chain index. 

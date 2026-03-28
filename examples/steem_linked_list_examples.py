@@ -100,13 +100,13 @@ print(f"Sync found {new_count} new nodes.")
 # --- Forward iteration (skips deleted / tombstoned nodes) ---
 print("\n--- All nodes (forward) ---")
 for node in ll_fresh:
-    print(f"  seq={node.seq}  payload={node.payload}")
+    print(f"  seq={node.seq}  payload={node.payload}  initiated={node.timestamp}")
 
 # --- Reverse walk from the tail ---
 print("\n--- Reverse walk ---")
 tail_seq = ll_fresh.tail().seq
 for node in ll_fresh.walk(start_seq=tail_seq, reverse=True):
-    print(f"  seq={node.seq}  payload={node.payload}")
+    print(f"  seq={node.seq}  payload={node.payload}  initiated={node.timestamp}")
 
 # --- head() / tail() ---
 print("\nHead node:", ll_fresh.head().payload)

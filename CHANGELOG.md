@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6-alpha] - 2026-03-28
+
+### Added
+- **Transaction Initiation Time**: A `timestamp` field (ISO-8601 format) is now included in each node's on-chain envelope. This records the time an operation was first attempted, which is preserved across all retries in a `safe_append` or `safe_delete` loop.
+
 ## [0.0.5-alpha] - 2026-03-27
 
 ### Added

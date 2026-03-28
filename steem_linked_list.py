@@ -10,6 +10,7 @@ the following envelope structure:
 {
     "ll_id":    "<list identifier>",       # groups nodes belonging to the same list
     "seq":      <int>,                     # 0-based sequence index within this list
+    "timestamp": "<str>",                  # ISO-8601 time when transaction was initiated
     "head": {                              # pointer to the FIRST node of the list
         "block": <int>,                    # 0 if null
         "trx_id": "<str>",                 # empty string if null
@@ -48,8 +49,9 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.5-alpha"
+__version__ = "0.0.6-alpha"
 
+import datetime
 import json
 import logging
 import random
@@ -100,6 +102,7 @@ class ListNode:
     prev: NodePointer                   # pointer to previous node
     next: NodePointer                   # pointer to next node (may be stale on-chain)
     payload: Dict[str, Any]             # application data
+    timestamp: Optional[str] = None     # time transaction was initiated
     # Populated after the transaction is confirmed:
     block_num: Optional[int] = None
     trx_id: Optional[str] = None
@@ -113,13 +116,16 @@ class ListNode:
         return NodePointer(block=self.block_num or 0, trx_id=self.trx_id or "", trx_num=self.trx_num)
 
     def to_json_payload(self) -> Dict[str, Any]:
-        return {
+        payload_dict = {
             "ll_id":   self.ll_id,
             "seq":     self.seq,
             "head":    self.head.to_dict(),
             "prev":    self.prev.to_dict(),
             "payload": self.payload,
         }
+        if self.timestamp:
+            payload_dict["timestamp"] = self.timestamp
+        return payload_dict
 
     @classmethod
     def from_json_payload(
@@ -137,6 +143,7 @@ class ListNode:
             prev=NodePointer.from_dict(data["prev"]),
             next=NodePointer.from_dict(data.get("next", {})),
             payload=data.get("payload", {}),
+            timestamp=data.get("timestamp"),
             block_num=block_num,
             trx_id=trx_id,
             trx_num=trx_num,
@@ -776,7 +783,7 @@ class SteemLinkedList:
     # Core list operations
     # ------------------------------------------------------------------ #
 
-    def append(self, payload: Dict[str, Any]) -> ListNode:
+    def append(self, payload: Dict[str, Any], timestamp: Optional[str] = None) -> ListNode:
         """
         Append a new node carrying *payload* to the tail of the list.
 
@@ -791,7 +798,7 @@ class SteemLinkedList:
         # Automatically create a dataless anchor if the list is completely empty
         if not self._index and not payload.get("_is_anchor"):
             logger.info("List is empty. Automatically creating a dataless anchor at seq=0.")
-            self.append({"_is_anchor": True, "desc": "List Anchor"})
+            self.append({"_is_anchor": True, "desc": "List Anchor"}, timestamp=timestamp)
 
         seq = len(self._index)
         prev_ptr = self._tail.pointer if self._tail else NodePointer.null()
@@ -802,6 +809,8 @@ class SteemLinkedList:
             # Placeholder — will be updated once we know the trx_id.
             head_ptr = NodePointer.null()
 
+        initiated_time = timestamp or datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+
         node = ListNode(
             ll_id=self.ll_id,
             seq=seq,
@@ -809,6 +818,7 @@ class SteemLinkedList:
             prev=prev_ptr,
             next=NodePointer.null(),
             payload=payload,
+            timestamp=initiated_time,
         )
 
         result = self._broadcast(node)
@@ -855,11 +865,13 @@ class SteemLinkedList:
         at the exact same time and caused a fork, the orphaned node is detected, 
         and the append is automatically retried on the winning branch.
         """
+        initiated_time = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+
         for attempt in range(max_retries):
             self.sync()
             old_tail = self._tail
             
-            node = self.append(payload)
+            node = self.append(payload, timestamp=initiated_time)
             logger.info("safe_append attempt %d: broadcast tx %s", attempt + 1, node.trx_id)
             
             # Wait for potential concurrent writes to settle in the blockchain
@@ -892,7 +904,7 @@ class SteemLinkedList:
     # Soft-delete  (tombstone approach — Steem is immutable)
     # ------------------------------------------------------------------ #
 
-    def delete(self, seq: int) -> ListNode:
+    def delete(self, seq: int, timestamp: Optional[str] = None) -> ListNode:
         """
         Logically delete the node at *seq* by appending a tombstone node.
         
@@ -915,7 +927,7 @@ class SteemLinkedList:
         tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
         
         # Keep the prev-chain continuous by making the tombstone a normal append
-        tombstone = self.append(tombstone_payload)
+        tombstone = self.append(tombstone_payload, timestamp=timestamp)
         
         # Logically delete the target in the local index
         target.payload["_deleted"] = True
@@ -928,6 +940,8 @@ class SteemLinkedList:
         Logically delete a node using Optimistic Concurrency Control (OCC).
         Safe to use when multiple instances might be modifying the list.
         """
+        initiated_time = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+
         for attempt in range(max_retries):
             self.sync()
             
@@ -953,7 +967,7 @@ class SteemLinkedList:
             tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
             
             # Broadcast directly using append
-            tombstone = self.append(tombstone_payload)
+            tombstone = self.append(tombstone_payload, timestamp=initiated_time)
             logger.info("safe_delete attempt %d: broadcast tx %s", attempt + 1, tombstone.trx_id)
             
             # Exponential backoff with jitter to reduce collision probability on retry
@@ -976,13 +990,13 @@ class SteemLinkedList:
 
         raise RuntimeError(f"Failed to safely delete after {max_retries} attempts due to high contention.")
 
-    def delete_active(self, index: int) -> ListNode:
+    def delete_active(self, index: int, timestamp: Optional[str] = None) -> ListNode:
         """
         Logically delete the n-th active (non-deleted) node in the list.
         Supports negative indexing (e.g., -1 for the last active node).
         """
         target_node = self.get_active(index)
-        return self.delete(target_node.seq)
+        return self.delete(target_node.seq, timestamp=timestamp)
 
     def safe_delete_active(self, index: int, max_retries: int = 5, wait_time: float = 15.0) -> ListNode:
         """
