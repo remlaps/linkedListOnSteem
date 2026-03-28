@@ -65,10 +65,10 @@ def main():
         markdown_report.append(f"\n## {title}")
 
     # Initialize Markdown Report
-    log(f"# SteemLinkedList Execution Report", md_only=True)
+    log(f"# linkedListOnSteem Execution Report", md_only=True)
     log(f"**List ID:** `{LIST_ID}`\n", md_only=True)
     log("This is an automated post demonstrating the capabilities of the "
-        "`steem_linked_list` data structure on the Steem blockchain.\n", md_only=True)
+        "`linkedListOnSteem` data structure on the Steem blockchain.\n", md_only=True)
 
     try:
         # 1. Append Nodes
@@ -161,7 +161,7 @@ def main():
         # -------------------------------------------------------------------
         log_header("Publishing Report")
 
-        post_title = f"SteemLinkedList v{__version__} Automated Test Run ({LIST_ID})"
+        post_title = f"linkedListOnSteem v{__version__} Automated Test Run ({LIST_ID})"
         post_body = "\n".join(markdown_report)
 
         if DRY_RUN:

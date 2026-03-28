@@ -1,6 +1,6 @@
 """
-steem_linked_list.py
-====================
+linkedListOnSteem
+=================
 A library for implementing a doubly-linked list data structure using
 custom_json transactions on the Steem blockchain.
 
@@ -39,7 +39,7 @@ Index rebuild strategy
 3. Reverse the collected nodes to restore forward order and assign seq numbers.
 
 This is O(n) targeted fetches — typically completing in seconds regardless
-of how long ago the list was created.  Use ``SteemLinkedList.rebuild_index()``
+of how long ago the list was created.  Use ``rebuild_index()``
 to resync, or ``import_index()`` to restore from a local cache.
 
 Dependencies
@@ -49,7 +49,7 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.7-alpha"
+__version__ = "0.0.8-alpha"
 
 import datetime
 import json
@@ -537,7 +537,7 @@ class SteemLinkedList:
         history_tail_ptr = self._find_tail_pointer(after_block=after_block)
 
         # 2. Scan recent blocks to find tails missed by lagging history or from other authors.
-        num_blocks_to_scan = 30  # Default scan depth
+        num_blocks_to_scan = 100 if (not history_tail_ptr or history_tail_ptr.is_null()) else 30
         MAX_SCAN_LIMIT = 200     # Cap the scan at ~10 minutes to prevent massive blockchain reads
         if history_tail_ptr and not history_tail_ptr.is_null():
             try:
@@ -609,7 +609,7 @@ class SteemLinkedList:
         # --- Hybrid Tail Discovery for new nodes ---
         history_tail_ptr = self._find_tail_pointer(after_block=after_block)
         
-        num_blocks_to_scan = 30
+        num_blocks_to_scan = 100 if (not history_tail_ptr or history_tail_ptr.is_null()) else 30
         MAX_SCAN_LIMIT = 200
         if history_tail_ptr and not history_tail_ptr.is_null():
             try:
@@ -798,7 +798,7 @@ class SteemLinkedList:
         # Automatically create a dataless anchor if the list is completely empty
         if not self._index and not payload.get("_is_anchor"):
             logger.info("List is empty. Automatically creating a dataless anchor at seq=0.")
-            self.append({"_is_anchor": True, "desc": "List Anchor"}, timestamp=timestamp)
+            self.append({"_is_anchor": True, "desc": "List Anchor", "_nonce": random.randint(0, 9999999)}, timestamp=timestamp)
 
         seq = len(self._index)
         prev_ptr = self._tail.pointer if self._tail else NodePointer.null()
@@ -871,8 +871,27 @@ class SteemLinkedList:
             self.sync()
             old_tail = self._tail
             
-            node = self.append(payload, timestamp=initiated_time)
-            logger.info("safe_append attempt %d: broadcast tx %s", attempt + 1, node.trx_id)
+            try:
+                node = self.append(payload, timestamp=initiated_time)
+                logger.info("safe_append attempt %d: broadcast tx %s", attempt + 1, node.trx_id)
+            except Exception as e:
+                logger.warning("safe_append attempt %d failed during broadcast (collision or network error): %s. Retrying...", attempt + 1, e)
+                current_wait = wait_time * (1.5 ** attempt) + random.uniform(0, 3.0)
+                time.sleep(current_wait)
+                self.rebuild_index()
+                
+                # Check if it was actually broadcasted despite the exception
+                found_node = None
+                start_seq = old_tail.seq if old_tail else 0
+                for n in self._index.values():
+                    if n.seq >= start_seq and n.timestamp == initiated_time and n.author == self.account and n.payload == payload:
+                        found_node = n
+                        break
+                if found_node:
+                    logger.info("Transaction was actually successful despite exception: %s", found_node.trx_id)
+                    node = found_node
+                else:
+                    continue
             
             # Wait for potential concurrent writes to settle in the blockchain
             # Exponential backoff with jitter to reduce collision probability on retry
@@ -924,7 +943,7 @@ class SteemLinkedList:
         if target.payload.get("_deleted"):
             raise ValueError(f"Node at seq={seq} is already deleted or is a tombstone.")
             
-        tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
+        tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id, "_nonce": random.randint(0, 9999999)}
         
         # Keep the prev-chain continuous by making the tombstone a normal append
         tombstone = self.append(tombstone_payload, timestamp=timestamp)
@@ -941,6 +960,7 @@ class SteemLinkedList:
         Safe to use when multiple instances might be modifying the list.
         """
         initiated_time = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+        op_nonce = random.randint(0, 9999999)
 
         for attempt in range(max_retries):
             self.sync()
@@ -964,11 +984,29 @@ class SteemLinkedList:
                 raise ValueError(f"Node at seq={seq} is already deleted or is a tombstone.")
                 
             old_tail = self._tail
-            tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
+            tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id, "_nonce": op_nonce}
             
-            # Broadcast directly using append
-            tombstone = self.append(tombstone_payload, timestamp=initiated_time)
-            logger.info("safe_delete attempt %d: broadcast tx %s", attempt + 1, tombstone.trx_id)
+            try:
+                # Broadcast directly using append
+                tombstone = self.append(tombstone_payload, timestamp=initiated_time)
+                logger.info("safe_delete attempt %d: broadcast tx %s", attempt + 1, tombstone.trx_id)
+            except Exception as e:
+                logger.warning("safe_delete attempt %d failed during broadcast (collision or network error): %s. Retrying...", attempt + 1, e)
+                current_wait = wait_time * (1.5 ** attempt) + random.uniform(0, 3.0)
+                time.sleep(current_wait)
+                self.rebuild_index()
+                
+                found_node = None
+                start_seq = old_tail.seq if old_tail else 0
+                for n in self._index.values():
+                    if n.seq >= start_seq and n.timestamp == initiated_time and n.author == self.account and n.payload == tombstone_payload:
+                        found_node = n
+                        break
+                if found_node:
+                    logger.info("Tombstone transaction was actually successful despite exception: %s", found_node.trx_id)
+                    tombstone = found_node
+                else:
+                    continue
             
             # Exponential backoff with jitter to reduce collision probability on retry
             current_wait = wait_time * (1.5 ** attempt) + random.uniform(0, 3.0)

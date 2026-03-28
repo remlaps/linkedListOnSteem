@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "linkedListOnSteem"
-version = "0.0.7-alpha"
+version = "0.0.8-alpha"
 description = "A Python library for implementing a doubly-linked list data structure using custom_json transactions on the Steem blockchain."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Database",
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",

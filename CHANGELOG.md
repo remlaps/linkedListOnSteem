@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8-alpha] - 2026-03-28
+
+### Added
+- **Transaction Nonce**: Added a `_nonce` field to auto-created anchors and tombstone payloads to ensure unique transaction hashes when multiple instances broadcast identical automated payloads simultaneously.
+
+### Changed
+- **Documentation Updates**: Replaced module-level documentation references from `SteemLinkedList` to `linkedListOnSteem` to accurately reflect the newly restructured package name.
+- **Increased Scan Depth**: Increased the default fallback block scan depth for newly discovered lists or missing history pointers from 30 to 100 blocks to better handle API indexing lag.
+
+### Fixed
+- **RPCError Handling in OCC**: Improved the Optimistic Concurrency Control loops in `safe_append` and `safe_delete` to gracefully catch and retry upon `RPCError` or network exceptions during broadcast (e.g., preventing complete crashes during Duplicate Transaction checks when multiple nodes auto-anchor).
+
 ## [0.0.7-alpha] - 2026-03-28
 
 ### Added

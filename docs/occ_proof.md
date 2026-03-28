@@ -1,6 +1,6 @@
 # Formal Proof of Correctness: Optimistic Concurrency Control (OCC)
 
-To provide a formal proof of correctness for the Optimistic Concurrency Control (OCC) implemented in `steem_linked_list.py`, we must mathematically model the system and prove it satisfies the two fundamental properties of concurrency algorithms: **Safety** (the list remains consistent without forks) and **Liveness** (concurrent writers eventually succeed).
+To provide a formal proof of correctness for the Optimistic Concurrency Control (OCC) implemented in the `linkedListOnSteem` library, we must mathematically model the system and prove it satisfies the two fundamental properties of concurrency algorithms: **Safety** (the list remains consistent without forks) and **Liveness** (concurrent writers eventually succeed).
 
 Here is the formal reasoning demonstrating that the OCC mechanism (`safe_append`, `safe_delete`, and `_is_orphaned`) is correct under a concurrent-honest-writer model.
 
@@ -77,7 +77,7 @@ $\blacksquare$ *Therefore, the system provides probabilistic liveness and will e
 
 ## Conclusion
 
-The Optimistic Concurrency Control (OCC) mechanism implemented in `steem_linked_list.py` is formally correct. 
+The Optimistic Concurrency Control (OCC) mechanism implemented in the `linkedListOnSteem` library is formally correct. 
 * It uses the underlying blockchain's consensus ordering as a deterministic tie-breaker (Last-Write-Wins based on block/transaction indices).
 * It verifies consistency by reading its own writes backward through the immutable `prev` pointer chain.
 * It guarantees eventual success under contention via randomized exponential backoff.
