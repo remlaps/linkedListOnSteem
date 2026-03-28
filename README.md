@@ -15,7 +15,7 @@ The index is quickly rebuilt on-demand by locating the list's tail in the accoun
 * **Efficient Syncing**: 
     * `rebuild_index()`: Reconstructs the list in seconds, regardless of how long ago it was created.
     * `sync()`: Incrementally fetches only new nodes added since the last check.
-* **Multi-Author Concurrency Safe**: Use `safe_append()` to enable Optimistic Concurrency Control (OCC). If multiple accounts write to the same list simultaneously, the library uses direct block scanning to detect and resolve forks, ensuring data consistency.
+* **Multi-Author Concurrency Safe**: Use `safe_append()` and `safe_delete()` to enable Optimistic Concurrency Control (OCC). If multiple accounts write to the same list simultaneously, the library uses direct block scanning to detect and resolve forks, and applies exponential backoff with jitter to retry operations reliably under high contention, ensuring data consistency.
 * **Local Caching**: Export and import the list index (`export_index()` / `import_index()`) to avoid re-querying the blockchain on startup.
 * **Rich Traversal**: Forward and reverse iteration, absolute and active index access (`get()`, `get_active()`), and predicate-based searching (`find()`, `find_all()`).
 

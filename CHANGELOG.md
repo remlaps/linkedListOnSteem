@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5-alpha] - 2026-03-27
+
+### Added
+- **Deletion Guard**: `delete()` and `safe_delete()` now raise a `ValueError` if you attempt to delete a node that is already deleted or is a tombstone, preventing wasted blockchain operations.
+
+### Changed
+- **Smarter `safe_delete`**: The `safe_delete()` method now manages its own Optimistic Concurrency Control (OCC) loop. If two threads attempt to delete the same node, the second thread will now detect that the node has already been deleted upon retry and will abort gracefully instead of creating a redundant tombstone.
+- **OCC Improvements**: Added exponential backoff with jitter to the `safe_append()` and `safe_delete()` retry loops to progressively reduce collision probabilities under high contention.
+- **Robust Rollbacks**: Enhanced the fallback mechanism during concurrency collisions to perform a full `rebuild_index()`, guaranteeing sequence number alignment against complex multi-node forks.
+- **Concurrent Deletes**: `safe_delete()` now correctly treats the operation as a success (returning the existing tombstone) if it detects that a concurrent writer already successfully deleted the target node while waiting to retry.
+
 ## [0.0.4-alpha] - 2026-03-27
 
 ### Changed

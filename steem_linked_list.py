@@ -48,10 +48,11 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.4-alpha"
+__version__ = "0.0.5-alpha"
 
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -862,7 +863,9 @@ class SteemLinkedList:
             logger.info("safe_append attempt %d: broadcast tx %s", attempt + 1, node.trx_id)
             
             # Wait for potential concurrent writes to settle in the blockchain
-            time.sleep(wait_time)
+            # Exponential backoff with jitter to reduce collision probability on retry
+            current_wait = wait_time * (1.5 ** attempt) + random.uniform(0, 3.0)
+            time.sleep(current_wait)
             
             is_orphaned_status = self._is_orphaned(node)
             if is_orphaned_status is False:
@@ -880,15 +883,8 @@ class SteemLinkedList:
                 node.trx_id
             )
             
-            # Rollback local state to prepare for sync & retry
-            if old_tail is None:
-                self.rebuild_index()
-            else:
-                if node.seq in self._index:
-                    del self._index[node.seq]
-                self._tail = old_tail
-                old_tail.next = NodePointer.null()
-                self.sync()
+            # Rollback local state completely to be safe against complex multi-node forks
+            self.rebuild_index()
                 
         raise RuntimeError(f"Failed to safely append after {max_retries} attempts due to high contention.")
 
@@ -913,6 +909,8 @@ class SteemLinkedList:
         target = self._index[seq]
         if target.payload.get("_is_anchor"):
             raise ValueError("Cannot delete an anchor node.")
+        if target.payload.get("_deleted"):
+            raise ValueError(f"Node at seq={seq} is already deleted or is a tombstone.")
             
         tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
         
@@ -930,22 +928,53 @@ class SteemLinkedList:
         Logically delete a node using Optimistic Concurrency Control (OCC).
         Safe to use when multiple instances might be modifying the list.
         """
-        self._require_index()
-        if seq == 0:
-            raise ValueError("Cannot delete the root anchor node (seq=0).")
-        if seq not in self._index:
-            raise KeyError(f"No node at seq={seq}.")
-
-        target = self._index[seq]
-        if target.payload.get("_is_anchor"):
-            raise ValueError("Cannot delete an anchor node.")
+        for attempt in range(max_retries):
+            self.sync()
             
-        tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
-        tombstone = self.safe_append(tombstone_payload, max_retries, wait_time)
-        
-        target.payload["_deleted"] = True
-        logger.info("Safely tombstoned node seq=%d via append seq=%d", seq, tombstone.seq)
-        return tombstone
+            self._require_index()
+            if seq == 0:
+                raise ValueError("Cannot delete the root anchor node (seq=0).")
+            if seq not in self._index:
+                raise KeyError(f"No node at seq={seq}.")
+
+            target = self._index[seq]
+            if target.payload.get("_is_anchor"):
+                raise ValueError("Cannot delete an anchor node.")
+            if target.payload.get("_deleted"):
+                if attempt > 0:
+                    logger.info("Node at seq=%d was successfully deleted by a concurrent writer. Aborting redundant delete.", seq)
+                    for n in self._index.values():
+                        if n.payload.get("_deleted") and n.payload.get("_target_trx_id") == target.trx_id:
+                            return n
+                    return target
+                raise ValueError(f"Node at seq={seq} is already deleted or is a tombstone.")
+                
+            old_tail = self._tail
+            tombstone_payload = {"_deleted": True, "_target_trx_id": target.trx_id}
+            
+            # Broadcast directly using append
+            tombstone = self.append(tombstone_payload)
+            logger.info("safe_delete attempt %d: broadcast tx %s", attempt + 1, tombstone.trx_id)
+            
+            # Exponential backoff with jitter to reduce collision probability on retry
+            current_wait = wait_time * (1.5 ** attempt) + random.uniform(0, 3.0)
+            time.sleep(current_wait)
+            
+            is_orphaned_status = self._is_orphaned(tombstone)
+            if is_orphaned_status is False:
+                target.payload["_deleted"] = True
+                logger.info("Safely tombstoned node seq=%d via append seq=%d", seq, tombstone.seq)
+                return tombstone
+                
+            if is_orphaned_status is None:
+                raise RuntimeError(f"Could not verify delete of {tombstone.trx_id}. Cannot confirm state.")
+                
+            logger.warning("safe_delete collision detected: %s was orphaned. Retrying...", tombstone.trx_id)
+            
+            # Rollback local state completely to be safe against complex multi-node forks
+            self.rebuild_index()
+
+        raise RuntimeError(f"Failed to safely delete after {max_retries} attempts due to high contention.")
 
     def delete_active(self, index: int) -> ListNode:
         """
