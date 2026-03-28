@@ -27,6 +27,24 @@ The index is quickly rebuilt on-demand by locating the list's tail in the accoun
 * Python 3.7+
 * `steem-python` (`pip install steem`)
 
+## Installation
+
+### From GitHub
+
+```bash
+pip install git+https://github.com/remlaps/linkedListOnSteem.git
+```
+
+### Development Installation
+
+For development purposes, you can clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/remlaps/linkedListOnSteem.git
+cd linkedListOnSteem
+pip install -e .
+```
+
 ## Quick Start
 
 Make sure to set your Steem posting key securely, for example via an environment variable.
@@ -34,7 +52,7 @@ Make sure to set your Steem posting key securely, for example via an environment
 ```python
 import os
 from steem import Steem
-from steem_linked_list import SteemLinkedList
+from linkedListOnSteem import SteemLinkedList
 
 # 1. Connect to Steem
 POSTING_KEY = os.getenv("STEEM_POSTING_KEY")

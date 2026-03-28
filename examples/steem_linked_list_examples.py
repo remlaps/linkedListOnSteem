@@ -20,11 +20,11 @@ import os
 import sys
 import time
 
-# Add parent directory to sys.path so it can find steem_linked_list.py
+# Add parent directory to sys.path so it can find the linkedListOnSteem package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from steem import Steem
-from steem_linked_list import SteemLinkedList, NodePointer
+from linkedListOnSteem import SteemLinkedList, NodePointer
 
 
 # ---------------------------------------------------------------------------

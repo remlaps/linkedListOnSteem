@@ -9,11 +9,11 @@ import sys
 import time
 import threading
 
-# Add parent directory to sys.path so it can find steem_linked_list.py
+# Add parent directory to sys.path so it can find the linkedListOnSteem package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from steem import Steem
-from steem_linked_list import SteemLinkedList
+from linkedListOnSteem import SteemLinkedList
 
 ACCOUNT = os.getenv("STEEM_ACCOUNT", "")
 POSTING_KEY = os.getenv("STEEM_POSTING_KEY", "")

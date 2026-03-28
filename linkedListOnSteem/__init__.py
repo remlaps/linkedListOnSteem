@@ -49,7 +49,7 @@ Dependencies
 
 from __future__ import annotations
 
-__version__ = "0.0.6-alpha"
+__version__ = "0.0.7-alpha"
 
 import datetime
 import json

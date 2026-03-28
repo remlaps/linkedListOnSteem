@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linkedListOnSteem"
+version = "0.0.7-alpha"
+description = "A Python library for implementing a doubly-linked list data structure using custom_json transactions on the Steem blockchain."
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "remlaps", email = "remlaps@users.noreply.github.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+requires-python = ">=3.7"
+dependencies = [
+    "steem>=0.18.132",
+]
+
+[project.urls]
+Homepage = "https://github.com/remlaps/linkedListOnSteem"
+Repository = "https://github.com/remlaps/linkedListOnSteem"
+Issues = "https://github.com/remlaps/linkedListOnSteem/issues"
+
+[tool.setuptools.packages.find]
+include = ["linkedListOnSteem*"]
+
+[tool.setuptools.package-data]
+linkedListOnSteem = ["*.md", "*.txt"]

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7-alpha] - 2026-03-28
+
+### Added
+- **GitHub Installation Support**: Added `pyproject.toml` configuration enabling users to install the package directly from GitHub using `pip install git+https://github.com/remlaps/linkedListOnSteem.git`.
+- **Proper Python Package Structure**: Reorganized the project into a proper Python package structure with `linkedListOnSteem/` as the main package directory.
+- **Fixed Import Statements**: Updated all example and test scripts to use the correct import statements for the new package structure.
+
+### Changed
+- **Modern Packaging**: Migrated from a single-module structure to a proper Python package using `pyproject.toml` and setuptools.
+- **Package Name**: The package is now imported as `import linkedListOnSteem` instead of `import steem_linked_list`.
+
 ## [0.0.6-alpha] - 2026-03-28
 
 ### Added
